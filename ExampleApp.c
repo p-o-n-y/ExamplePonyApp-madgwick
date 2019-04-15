@@ -1,647 +1,287 @@
 #include "stdafx.h" //for Visual studio
 #include <stdlib.h>
-#include <string.h>
+#include <stdio.h>
+#include <math.h>
 #include "pony.h"
 
 
+#define deltat 1/250. // sampling period in seconds (shown as 1 ms)
+#define gyroMeasError 3.14159265358979f * (5.0f / 180.0f) //gyroscope measurement error in rad / s(shown as 5 deg / s)
+#define beta sqrt(3.0f / 4.0f) * gyroMeasError // compute beta
+#define M_PI 3.14159265358979323846
+
+
+void read_imu_from_file_aist(void);
+void calibr(void);
+void madgwick(void);
+void write_quat_to_file(void);
 
 
 
-///
-///     Internal pony functions and definitions
-///
-
-
-
-
-
-pony_struct pony = { pony_bus_version,0 };
-
-// function for comparing strings up to a given length (like strncmp from string.h) but with a limited functionality (0 - equal, 1 - not equal)
-// char* s1, char* s2 are the compared strings
-// substrlen is the lenght up to which strings are compared, in pony is usually the lenght of a smaller string
-char pony_strncmpeff(char* s1, char* s2, int substrlen)
+int main()
 {
-	int i;
-	for (i = 0; i < substrlen; i++)
+	pony_add_plugin(read_imu_from_file_aist);
+	pony_add_plugin(calibr);
+	pony_add_plugin(madgwick);
+	pony_add_plugin(write_quat_to_file);
+
+	if (pony_init("{imu: in = \"newData.txt\" Mwx = 1.9937; Mwy = 2.1801; Mwz = 2.2016; Mfx = 2.0019; Afx = -254.4204; Mfy = 2.0015; Afy = 261.7441; Mfz = 2.0009; Afz = -260.9625} out = \"out.txt\""));
 	{
-		if (s1[i] != s2[i])
-		{
-			return 1;
-		}
+		while (pony_step());
 	}
+
 	return 0;
 }
 
-char pony_strcmptofixed(char* str, char* substr) //not used
+void filterUpdate(double *q, double w_x, double w_y, double w_z, double a_x, double a_y, double a_z);
+
+void read_imu_from_file_aist(void)
 {
-	int n = 0;
-	while (substr[n] != '\0')
+	static char * fileName;
+	static FILE * fpimu;
+	static char buffer[1024];
+	int scanned;
+	static double* f, *w;
+
+	if (pony.bus.mode > 0)
 	{
-		n++;
-	}
-	return pony_strncmpeff(str, substr, n);
-}
-
-// function for locating the beginning of a substring in a string with a given length
-// char* str is the general string
-// int len is the lenght of the general string
-// char* substr is the substring to be located
-// int substrlen is the length of the substring
-char* pony_locatesubstrn(char* str, int len, char* substr, int substrlen)
-{
-	int n = 0;
-	while (n + substrlen <= len)
-	{
-		if (pony_strncmpeff(str + n, substr, substrlen) == 0)
+		if (feof(fpimu))
 		{
-			return str + n;
+			pony.bus.mode = -1;
+			return;
 		}
-		n++;
-	}
-	return NULL;
-}
+		fgets(buffer, 1023, fpimu);
 
-// function for locating the end of a substring in a string with a given length
-// char* str is the general string
-// int len is the lenght of the general string
-// char* substr is the substring to be located
-char* pony_locatesubstrendn(char* str, int len, char* substr)
-{
-	int n;
-	n = 0;
-	while (substr[n] != '\0')
-	{
-		n++;
-	}
-	char* res = pony_locatesubstrn(str, len, substr, n);
-	if (res == NULL)
-	{
-		return NULL;
-	}
-
-	return res + n;
-}
-
-// function spesificaly for locating the beginning of a substring in given configuration group
-// char* str is a part of a configuration string
-// char* substr is the substring to be located
-// int substrlen is the pre-calculated substring length
-char* pony_locatesubstreff(char* str, char* substr, int substrlen)
-{
-	char* res = str;
-
-	int in = 0;
-
-	while ((*res) != '\0')
-	{
-		if (in == 0 && pony_strncmpeff(res, substr, substrlen) == 0)
+		scanned = sscanf(buffer, "%*g %lg %lg %lg  %lg %lg %lg", &w[0], &w[1], &w[2], &f[0], &f[1], &f[2]);
+		if (scanned < 6)
 		{
-			return res;
-		}
-		if (res[0] == '{')
-		{
-			in++;
-		}
-		if (res[0] == '}')
-		{
-			in--;
-		}
-
-		res++;
-	}
-	return NULL;
-}
-
-// function spesificaly for locating the end of a substring in given configuration group
-// char* str is a part of a configuration string
-// char* substr is the substring to be located
-// int substrlen is the pre-calculated substring length
-char* pony_locatesubstrendeff(char* str, char* substr, int substrlen)
-{
-	char* res = str;
-
-	int in = 0;
-
-	while ((*res) != '\0')
-	{
-		if (in == 0 && pony_strncmpeff(res, substr, substrlen) == 0)
-		{
-			return res + substrlen;
-		}
-		if (res[0] == '{')
-		{
-			in++;
-		}
-		if (res[0] == '}')
-		{
-			in--;
-		}
-
-		res++;
-	}
-	return NULL;
-}
-
-// function specifically for measuring a configuration group length
-// char* str is the beginning of the group
-int pony_conpartlength(char* str)
-{
-	return (int)(pony_locatesubstreff(str, "}", 1) - str);
-}
-
-// function for "distributing" substrings from configuration to their intended destinations
-// char* filter is the string used as an identifier of an inner configurator group (use "" for getting general settings substring)
-// char* str is the string of configurator that directly contains the searched substring ( if "a {b: c {d: e} }" is passed only "a" or " c {d: e} " can be obtained, not "c" or " e")
-// int len is the length of str
-// char** substr is the pointer to be used for setting the pony pointer to the beginning of the searched substring
-// int* substrlen is the pointer to be used for setting the length of (*substr) in pony
-char pony_extractconsubstr(char* filter, char* str, int len, char** substr, int* substrlen)
-{
-	if (filter[0] == '\0')
-	{
-		int in = 0;
-		*substr = str;
-		*substrlen = len - 1;
-		while (*substr[0] == ' ' || *substr[0] == '{' || in != 0)
-		{
-			if (*substr[0] == '{')
-			{
-				in++;
-			}
-			if (*substr[0] == '}')
-			{
-				in--;
-			}
-			if (*substr - str == len)
-			{
-				return 0;
-			}
-			(*substr)++;
-		}
-
-		while (1)
-		{
-			if ((str + *substrlen)[0] == '{')
-			{
-				in++;
-			}
-			if ((str + *substrlen)[0] == '}')
-			{
-				in--;
-			}
-			if ((str + *substrlen)[0] != ' ' && in == 0)
-			{
-				return 1;
-			}
-			(*substrlen)--;
+			pony.bus.mode = -1;
 		}
 	}
-	else
+	else if (pony.bus.mode == 0)
 	{
-		int fillen = 0;
-		while (filter[fillen] != '\0')
+		f = (*pony.bus.imu).f.val;
+		w = (*pony.bus.imu).w.val;
+		int len;
+		if (pony_extract_string_length((*pony.bus.imu).conf, (*pony.bus.imu).conflength, "in = \"", &len))
 		{
-			fillen++;
-		}
-		if ((*substr = pony_locatesubstrendeff(str, filter, fillen)) == NULL)
-		{
-			return 0;
-		}
-		*substrlen = pony_conpartlength(*substr);
-		return 1;
-	}
-}
-
-// function that copies all the symbols from one string to the other, but all symbols with codes between (and including) 1 to 31 are changed to ' ' with the exception of the ones in double quotes
-// char* fromstr is the configuration initial string
-// char** tostr is the pointer to the string to which the formatted configuration is copied
-void pony_format(char* fromstr, char** tostr)
-{
-	int n = 0;
-	int i = 0;
-	while (fromstr[i] != '\0')
-	{
-		if (fromstr[i] == '\"')
-		{
-			n = !n;
-		}
-		if (n == 0 && fromstr[i] > 0 && fromstr[i] < 32)
-		{
-			(*tostr)[i] = ' ';
+			fileName = malloc(sizeof(char*) * len + 1);
+			pony_extract_string((*pony.bus.imu).conf, (*pony.bus.imu).conflength, "in = \"", &fileName);
+			fileName[len] = '\0';
 		}
 		else
 		{
-			(*tostr)[i] = fromstr[i];
-		}
-		i++;
-	}
-	(*tostr)[i] = '\0';
-}
-
-// function for initialising pony_dataArrays depending on their sizes
-// pony_dataArray *dataarr is the pony_dataArray to be initialised
-// int size is the size of the array
-void pony_setDASize(pony_dataArray *dataarr, int size)
-{
-	(*dataarr).arrsize = size;
-	(*dataarr).val = (double*)calloc(sizeof(double), size);
-}
-
-// function for freeing the memory allocated to pony, should be used only as the last step of terminating pony's activity
-void pony_free()
-{
-
-	if (pony.bus.imu != NULL)
-	{
-		free((*pony.bus.imu).f.val);
-		free((*pony.bus.imu).q.val);
-		free((*pony.bus.imu).w.val);
-
-		free(pony.bus.imu);
-	}
-
-	if (pony.bus.gnss != NULL)
-	{
-		if ((*pony.bus.gnss).gps != NULL)
-		{
-			free((*pony.bus.gnss).gps);
+			fileName = "imuDataIn.txt";
 		}
 
-		if ((*pony.bus.gnss).glo != NULL)
-		{
-			free((*pony.bus.gnss).glo);
-		}
+		fpimu = fopen(fileName, "r");
 
-		free(pony.bus.gnss);
-	}
-
-	free(pony.conf);
-	free(pony.plugins);
-
-}
-
-
-
-
-
-///
-///     Main pony functions for external programs
-///
-
-
-
-
-
-// function for adding user functions to the list of pony plugins, plugins are called in the order of being added
-// void(*newplugin)(void) is the plugin that the user wishes to add
-char pony_add_plugin(void(*newplugin)(void))
-{
-	if (pony.plugins == NULL)
-	{
-		pony.plugins = (void(**)(void))malloc(sizeof(void(*)(void)));
 	}
 	else
 	{
-		pony.plugins = (void(**)(void))realloc(pony.plugins, (pony.pluginsNum + 1) * sizeof(void(*)(void)));
-	}
-	pony.plugins[pony.pluginsNum] = newplugin;
-	pony.pluginsNum++;
+		fclose(fpimu);
 
-	return 1; // пока единица - успешное завершение
+		free(fileName);
+	}
 }
 
-
-// function for initialising pony with a user-passed configuration string
-// char* config is the configuration for pony
-char pony_init(char* config)
+void calibr(void)
 {
-	pony.conflength = 0;
+	static float Mwx, Mwy, Mwz, Mfx, Mfy, Mfz, Afx, Afy, Afz, Awx, Awy, Awz;
+	static double* f, *w;
 
-	while (config[pony.conflength] != '\0')
+	if (pony.bus.mode > 0)
 	{
-		pony.conflength++;
+		w[0] = ((w[0] - Awx) * M_PI) / (Mwx * 648000); //gyroscope
+		w[1] = ((w[1] - Awy) * M_PI) / (Mwy * 648000);
+		w[2] = ((w[2] - Awz) * M_PI) / (Mwz * 648000);
+		f[0] = (f[0] - Afx) / Mfx; //accelerometer
+		f[1] = (f[1] - Afy) / Mfy;
+		f[2] = (f[2] - Afz) / Mfz;
 	}
-
-	pony.conf = malloc(sizeof(char) * (pony.conflength + 1));
-	pony_format(config, &pony.conf);
-
-
-	pony_extractconsubstr("", pony.conf, pony.conflength, &pony.bus.conf, &pony.bus.conflength);
-
-
-	char* strbuffer = NULL;
-	int lbuffer = 0;
-
-	if (pony_extractconsubstr("{imu:", pony.conf, pony.conflength, &strbuffer, &lbuffer))
+	else if (pony.bus.mode == 0)
 	{
-		pony.bus.imu = (pony_imu*)calloc(sizeof(pony_imu), 1);
-		(*pony.bus.imu).conf = strbuffer;
-		(*pony.bus.imu).conflength = lbuffer;
-
-		pony_setDASize(&(*pony.bus.imu).f, 3);
-		pony_setDASize(&(*pony.bus.imu).q, 4);
-		pony_setDASize(&(*pony.bus.imu).w, 3);
-	}
-
-	if (pony_extractconsubstr("{gnss:", pony.conf, pony.conflength, &strbuffer, &lbuffer))
-	{
-		pony.bus.gnss = (pony_gnss*)calloc(sizeof(pony_gnss), 1);
-		(*pony.bus.gnss).wconf = strbuffer;
-		(*pony.bus.gnss).wconflength = lbuffer;
-
-		pony_extractconsubstr("", (*pony.bus.gnss).wconf, (*pony.bus.gnss).wconflength, &(*pony.bus.gnss).conf, &(*pony.bus.gnss).conflength);
-
-		if (pony_extractconsubstr("{gps:", (*pony.bus.gnss).wconf, (*pony.bus.gnss).wconflength, &strbuffer, &lbuffer))
+		f = (*pony.bus.imu).f.val;
+		w = (*pony.bus.imu).w.val;
+		if (!pony_extract_float((*pony.bus.imu).conf, (*pony.bus.imu).conflength, "Mwx = ", &Mwx))
 		{
-			(*pony.bus.gnss).gps = (pony_gnss_gps*)calloc(sizeof(pony_gnss_gps), 1);
-			(*(*pony.bus.gnss).gps).conf = strbuffer;
-			(*(*pony.bus.gnss).gps).conflength = lbuffer;
+			Mwx = 1;
 		}
-
-		if (pony_extractconsubstr("{glo:", (*pony.bus.gnss).wconf, (*pony.bus.gnss).wconflength, &strbuffer, &lbuffer))
+		if (!pony_extract_float((*pony.bus.imu).conf, (*pony.bus.imu).conflength, "Mwy = ", &Mwy))
 		{
-			(*pony.bus.gnss).glo = (pony_gnss_glo*)calloc(sizeof(pony_gnss_glo), 1);
-			(*(*pony.bus.gnss).glo).conf = strbuffer;
-			(*(*pony.bus.gnss).glo).conflength = lbuffer;
+			Mwy = 1;
 		}
-
-	}
-
-
-	pony.exitplnum = -1;
-
-	return 1; // пока единица - успешное завершение
-}
-
-// function that is called by user during an iteration of a cycle of external program
-char pony_step(void)
-{
-	int i;
-
-	for (i = 0; i < pony.pluginsNum; i++)
-	{
-		pony.plugins[i]();
-
-		if (pony.exitplnum == i)
+		if (!pony_extract_float((*pony.bus.imu).conf, (*pony.bus.imu).conflength, "Mwz = ", &Mwz))
 		{
-			pony.exitplnum = -1;
-			pony_free();
-			break;
+			Mwz = 1;
 		}
-
-		if (pony.bus.mode < 0 && pony.exitplnum == -1)
+		if (!pony_extract_float((*pony.bus.imu).conf, (*pony.bus.imu).conflength, "Mfx = ", &Mfx))
 		{
-			pony.exitplnum = i;
+			Mfx = 1;
+		}
+		if (!pony_extract_float((*pony.bus.imu).conf, (*pony.bus.imu).conflength, "Mfy = ", &Mfy))
+		{
+			Mfy = 1;
+		}
+		if (!pony_extract_float((*pony.bus.imu).conf, (*pony.bus.imu).conflength, "Mfz = ", &Mfz))
+		{
+			Mfz = 1;
+		}
+		if (!pony_extract_float((*pony.bus.imu).conf, (*pony.bus.imu).conflength, "Afx = ", &Afx))
+		{
+			Afx = 0;
+		}
+		if (!pony_extract_float((*pony.bus.imu).conf, (*pony.bus.imu).conflength, "Afy = ", &Afy))
+		{
+			Afy = 0;
+		}
+		if (!pony_extract_float((*pony.bus.imu).conf, (*pony.bus.imu).conflength, "Afz = ", &Afz))
+		{
+			Afz = 0;
+		}
+		if (!pony_extract_float((*pony.bus.imu).conf, (*pony.bus.imu).conflength, "Awx = ", &Awx))
+		{
+			Awx = 0;
+		}
+		if (!pony_extract_float((*pony.bus.imu).conf, (*pony.bus.imu).conflength, "Awy = ", &Awy))
+		{
+			Awy = 0;
+		}
+		if (!pony_extract_float((*pony.bus.imu).conf, (*pony.bus.imu).conflength, "Awz = ", &Awz))
+		{
+			Awz = 0;
 		}
 	}
-
-	if (pony.bus.mode == 0)
+	else
 	{
-		pony.bus.mode = 1;
+
 	}
-	return (pony.bus.mode >= 0) || (pony.exitplnum >= 0);
 }
 
-// function that is called by user from external program if the user wishes to terminate pony's activity
-char pony_terminate()
+void madgwick(void)
 {
-	int i;
+	static double* f, *w, *q;
 
-	pony.bus.mode = -1;
-
-	for (i = 0; i < pony.pluginsNum; i++)
+	if (pony.bus.mode > 0)
 	{
-		pony.plugins[i]();
+		filterUpdate(q, w[0], w[1], w[2], f[0], f[1], f[2]);
 	}
+	else if (pony.bus.mode == 0)
+	{
+		f = (*pony.bus.imu).f.val;
+		w = (*pony.bus.imu).w.val;
+		q = (*pony.bus.imu).q.val;
+		q[0] = 1; //might read these from config later
+		q[1] = 0;
+		q[2] = 0;
+		q[3] = 0;
 
-	pony_free();
+	}
+	else
+	{
 
-	return 1; // пока единица - успешное завершение
+	}
 }
 
-
-
-
-
-///
-///     Standard extraction functions for variables defined by configurator
-///
-
-
-
-
-
-// function for getting the length of the string that would have been obtained using this identifier on pony_extract_string function, functions are not merged as memory is normally allocated in between them
-// works only for standard strings, for symbol " that does not mean the end of the string use ""
-// char* confstr is the configuration string containing the needed data
-// int length is the length of the configuration string
-// char* identifier is the string preceding the needed data
-// int* res is the pointer to the variable the data should be written to
-char pony_extract_string_length(char* confstr, int length, char* identifier, int* res)
+void write_quat_to_file(void)
 {
-	int i = 0;
-	*res = 0;
-	confstr = pony_locatesubstrendn(confstr, length, identifier);
-	if (confstr == NULL)
+	static char* fileName;
+	static FILE * fpout;
+	static double* q;
+
+	if (pony.bus.mode > 0)
 	{
-		return 0;
+		fprintf(fpout, "% +9.6f % +9.6f % +9.6f % +9.6f\n", q[0], q[1], q[2], q[3]);
 	}
-	while (confstr[i] != '\"' || confstr[i + 1] == '\"')
+	else if (pony.bus.mode == 0)
 	{
-		if (confstr[i] == '\"')
+		q = (*pony.bus.imu).q.val;
+		int len;
+		if (pony_extract_string_length(pony.bus.conf, pony.bus.conflength, "out = \"", &len))
 		{
-			i++;
+			fileName = malloc(sizeof(char*) * len + 1);
+			pony_extract_string(pony.bus.conf, pony.bus.conflength, "out = \"", &fileName);
+			fileName[len] = '\0';
 		}
-		i++;
-		(*res)++;
-	}
-	return 1;
-}
-
-// function for obtaining the string by identifier, as memory should be allocated in advance this function is not merged with pony_extract_string_length function
-// works only for standard strings, for symbol " that does not mean the end of the string use ""
-// char* confstr is the configuration string containing the needed data
-// int length is the length of the configuration string
-// char* identifier is the string preceding the needed data
-// char** res is the pointer to the variable the data should be written to
-char pony_extract_string(char* confstr, int length, char* identifier, char** res)
-{
-	int i = 0;
-	confstr = pony_locatesubstrendn(confstr, length, identifier);
-	if (confstr == NULL)
-	{
-		return 0;
-	}
-	while (confstr[i] != '\"' || confstr[i + 1] == '\"')
-	{
-		(*res)[i] = confstr[i];
-		if (confstr[i] == '\"' && confstr[i + 1] == '\"')
+		else
 		{
-			i++;
+			fileName = "dataOut.txt";
 		}
-		i++;
+
+		fpout = fopen(fileName, "w");
 	}
-	return 1;
+	else
+	{
+		fclose(fpout);
+	}
 }
 
-// function for obtaining symbol by identifier
-// char* confstr is the configuration string containing the needed data
-// int length is the length of the configuration string
-// char* identifier is the string preceding the needed data
-// char* res is the pointer to the variable the data should be written to
-char pony_extract_char_sym(char* confstr, int length, char* identifier, char* res)
+void filterUpdate(double *q, double w_x, double w_y, double w_z, double a_x, double a_y, double a_z)
 {
-	confstr = pony_locatesubstrendn(confstr, length, identifier);
-	if (confstr == NULL)
-	{
-		return 0;
-	}
-	*res = confstr[0];
-	return 1;
-}
+	//float SEq_1 = 1.0f, SEq_2 = 0.0f, SEq_3 = 0.0f, SEq_4 = 0.0f; //estimated orientation quaternion elements with initial conditions
+	// Local system variables
+	double norm; // vector norm
+	double SEqDot_omega_1, SEqDot_omega_2, SEqDot_omega_3, SEqDot_omega_4; // quaternion derrivative from gyroscopes elements
+	double f_1, f_2, f_3; // objective function elements
+	double J_11or24, J_12or23, J_13or22, J_14or21, J_32, J_33; //objective function Jacobian elements
 
-// function for obtaining number of type char by identifier
-// char* confstr is the configuration string containing the needed data
-// int length is the length of the configuration string
-// char* identifier is the string preceding the needed data
-// char* res is the pointer to the variable the data should be written to
-char pony_extract_char_num(char* confstr, int length, char* identifier, char* res)
-{
-	confstr = pony_locatesubstrendn(confstr, length, identifier);
-	if (confstr == NULL)
-	{
-		return 0;
-	}
-	if ((confstr[0] - '0' > 9 || confstr[0] - '0' < 0) && confstr[0] != '-')
-	{
-		return 0;
-	}
-	*res = (char)atoi(confstr);
-	return 1;
-}
+	double SEqHatDot_1, SEqHatDot_2, SEqHatDot_3, SEqHatDot_4;
+	// estimated direction of the gyroscope error
+	// Axulirary variables to avoid reapeated calcualtions
+	double halfSEq_1 = 0.5f * q[0];
+	double halfSEq_2 = 0.5f * q[1];
+	double halfSEq_3 = 0.5f * q[2];
+	double halfSEq_4 = 0.5f * q[3];
+	double twoSEq_1 = 2.0f * q[0];
+	double twoSEq_2 = 2.0f * q[1];
+	double twoSEq_3 = 2.0f * q[2];
+	// Normalise the accelerometer measurement
+	norm = sqrt(a_x * a_x + a_y * a_y + a_z * a_z);
+	a_x /= norm;
+	a_y /= norm;
+	a_z /= norm;
+	// Compute the objective function and Jacobian
+	f_1 = twoSEq_2 * q[3] - twoSEq_1 * q[2] - a_x;
+	f_2 = twoSEq_1 * q[1] + twoSEq_3 * q[3] - a_y;
+	f_3 = 1.0f - twoSEq_2 * q[1] - twoSEq_3 * q[2] - a_z;
+	J_11or24 = twoSEq_3; // J_11 negated in matrix multiplication
+	J_12or23 = 2.0f * q[3];
+	J_13or22 = twoSEq_1; // J_12 negated in matrix multiplication
+	J_14or21 = twoSEq_2;
+	J_32 = 2.0f * J_14or21; // negated in matrix multiplication
+	J_33 = 2.0f * J_11or24; // negated in matrix multiplication
 
-// function for obtaining number of type short by identifier
-// char* confstr is the configuration string containing the needed data
-// int length is the length of the configuration string
-// char* identifier is the string preceding the needed data
-// short* res is the pointer to the variable the data should be written to
-char pony_extract_short(char* confstr, int length, char* identifier, short* res)
-{
-	confstr = pony_locatesubstrendn(confstr, length, identifier);
-	if (confstr == NULL)
-	{
-		return 0;
-	}
-	if ((confstr[0] - '0' > 9 || confstr[0] - '0' < 0) && confstr[0] != '-')
-	{
-		return 0;
-	}
-	*res = (short)atoi(confstr);
-	return 1;
-}
+							// Compute the gradient (matrixmultiplication)
+	SEqHatDot_1 = J_14or21 * f_2 - J_11or24 * f_1;
+	SEqHatDot_2 = J_12or23 * f_1 + J_13or22 * f_2 - J_32 * f_3;
+	SEqHatDot_3 = J_12or23 * f_2 - J_33 * f_3 - J_13or22 * f_1;
+	SEqHatDot_4 = J_14or21 * f_1 + J_11or24 * f_2;
+	// Normalise the gradient
+	norm = sqrt(SEqHatDot_1 * SEqHatDot_1 + SEqHatDot_2 * SEqHatDot_2 + SEqHatDot_3 * SEqHatDot_3 + SEqHatDot_4 * SEqHatDot_4);
+	SEqHatDot_1 /= norm;
+	SEqHatDot_2 /= norm;
+	SEqHatDot_3 /= norm;
+	SEqHatDot_4 /= norm;
+	// Compute the quaternion derrivative measured by gyroscopes
+	SEqDot_omega_1 = -halfSEq_2 * w_x - halfSEq_3 * w_y -
 
-// function for obtaining number of type int by identifier
-// char* confstr is the configuration string containing the needed data
-// int length is the length of the configuration string
-// char* identifier is the string preceding the needed data
-// int* res is the pointer to the variable the data should be written to
-char pony_extract_int(char* confstr, int length, char* identifier, int* res)
-{
-	confstr = pony_locatesubstrendn(confstr, length, identifier);
-	if (confstr == NULL)
-	{
-		return 0;
-	}
-	if ((confstr[0] - '0' > 9 || confstr[0] - '0' < 0) && confstr[0] != '-')
-	{
-		return 0;
-	}
-	*res = atoi(confstr);
-	return 1;
-}
+		halfSEq_4 * w_z;
+	SEqDot_omega_2 = halfSEq_1 * w_x + halfSEq_3 * w_z -
+		halfSEq_4 * w_y;
+	SEqDot_omega_3 = halfSEq_1 * w_y - halfSEq_2 * w_z +
+		halfSEq_4 * w_x;
+	SEqDot_omega_4 = halfSEq_1 * w_z + halfSEq_2 * w_y -
+		halfSEq_3 * w_x;
+	// Compute then integrate the estimated quaternion derrivative
+	q[0] += (SEqDot_omega_1 - (beta * SEqHatDot_1)) * deltat;
+	q[1] += (SEqDot_omega_2 - (beta * SEqHatDot_2)) * deltat;
+	q[2] += (SEqDot_omega_3 - (beta * SEqHatDot_3)) * deltat;
+	q[3] += (SEqDot_omega_4 - (beta * SEqHatDot_4)) * deltat;
+	// Normalise quaternion
+	norm = sqrt(q[0] * q[0] + q[1] * q[1] + q[2] * q[2] + q[3] * q[3]);
+	q[0] /= norm;
+	q[1] /= norm;
+	q[2] /= norm;
+	q[3] /= norm;
 
-// function for obtaining number of type long by identifier
-// char* confstr is the configuration string containing the needed data
-// int length is the length of the configuration string
-// char* identifier is the string preceding the needed data
-// long* res is the pointer to the variable the data should be written to
-char pony_extract_long(char* confstr, int length, char* identifier, long* res)
-{
-	confstr = pony_locatesubstrendn(confstr, length, identifier);
-	if (confstr == NULL)
-	{
-		return 0;
-	}
-	if ((confstr[0] - '0' > 9 || confstr[0] - '0' < 0) && confstr[0] != '-')
-	{
-		return 0;
-	}
-	*res = atol(confstr);
-	return 1;
-}
-
-// function for obtaining number of type float by identifier
-// char* confstr is the configuration string containing the needed data
-// int length is the length of the configuration string
-// char* identifier is the string preceding the needed data
-// float* res is the pointer to the variable the data should be written to
-char pony_extract_float(char* confstr, int length, char* identifier, float* res)
-{
-	confstr = pony_locatesubstrendn(confstr, length, identifier);
-	if (confstr == NULL)
-	{
-		return 0;
-	}
-	if ((confstr[0] - '0' > 9 || confstr[0] - '0' < 0) && confstr[0] != '.' && confstr[0] != 'e' && confstr[0] != 'E' && confstr[0] != '-')
-	{
-		return 0;
-	}
-	*res = (float)atof(confstr);
-	return 1;
-}
-
-// function for obtaining number of type double by identifier
-// char* confstr is the configuration string containing the needed data
-// int length is the length of the configuration string
-// char* identifier is the string preceding the needed data
-// double* res is the pointer to the variable the data should be written to
-char pony_extract_double(char* confstr, int length, char* identifier, double* res)
-{
-	confstr = pony_locatesubstrendn(confstr, length, identifier);
-	if (confstr == NULL)
-	{
-		return 0;
-	}
-	if ((confstr[0] - '0' > 9 || confstr[0] - '0' < 0) && confstr[0] != '.' && confstr[0] != 'e' && confstr[0] != 'E' && confstr[0] != '-')
-	{
-		return 0;
-	}
-	*res = atof(confstr);
-	return 1;
-}
-
-// function for obtaining boolean by identifier (true - 1, false - 0)
-// char* confstr is the configuration string containing the needed data
-// int length is the length of the configuration string
-// char* identifier is the string preceding the needed data
-// char* res is the pointer to the variable the data should be written to
-char pony_extract_bool(char* confstr, int length, char* identifier, char* res)
-{
-	confstr = pony_locatesubstrendn(confstr, length, identifier);
-	if (confstr == NULL)
-	{
-		return 0;
-	}
-	if (pony_strncmpeff(confstr, "true", 4))
-	{
-		*res = 1;
-		return 1;
-	}
-	if (pony_strncmpeff(confstr, "false", 5))
-	{
-		*res = 0;
-		return 1;
-	}
-	return 0;
 }
