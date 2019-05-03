@@ -21,7 +21,7 @@ int main()
 	pony_add_plugin(madgwick);
 	pony_add_plugin(write_quat_to_file);
 
-	if (pony_init("{imu: in = \"newData.txt\" Mwx = 7177.32; Mwy = 7848.36; Mwz = 7925.76; Mfx = 2.0019; Afx = -254.4204; Mfy = 2.0015; Afy = 261.7441; Mfz = 2.0009; Afz = -260.9625; sampling rate = 250; error degree = 5} out = \"out.txt\""));
+	if (pony_init("{imu: in = \"newData.txt\" Mwx = 7177.32; Mwy = 7848.36; Mwz = 7925.76; Mfx = 2.0019; Afx = -254.4204; Mfy = 2.0015; Afy = 261.7441; Mfz = 2.0009; Afz = -260.9625; fs = 250; error degree = 5} out = \"out.txt\""));
 	{
 		while (pony_step());
 	}
@@ -88,6 +88,11 @@ void calibr(void)
 
 	if (pony.bus.mode > 0)
 	{
+		double temp[3];
+		temp[0] = ((w[0] - Awx) * M_PI) / (1.9937 * 648000); //gyroscope
+		temp[1] = ((w[1] - Awy) * M_PI) / (2.1801 * 648000); //Mwx = ; Mwy = ; Mwz = 
+		temp[2] = ((w[2] - Awz) * M_PI) / (2.2016 * 648000);
+
 		w[0] = (w[0] - Awx) / Mwx * (M_PI / 180); //gyroscope
 		w[1] = (w[1] - Awy) / Mwy * (M_PI / 180);
 		w[2] = (w[2] - Awz) / Mwz * (M_PI / 180);
@@ -156,8 +161,8 @@ void calibr(void)
 
 void madgwick(void)
 {
-	static double* f, *w, *q;
-	static double deltat, gyroMeasError, beta;
+	static double* f, *w, *q, *deltat;
+	static double gyroMeasError, beta;
 
 	if (pony.bus.mode > 0)
 	{
@@ -213,10 +218,10 @@ void madgwick(void)
 		SEqDot_omega_4 = halfSEq_1 * w[2] + halfSEq_2 * w[1] -
 			halfSEq_3 * w[0];
 		// Compute then integrate the estimated quaternion derrivative
-		q[0] += (SEqDot_omega_1 - (beta * SEqHatDot_1)) * deltat;
-		q[1] += (SEqDot_omega_2 - (beta * SEqHatDot_2)) * deltat;
-		q[2] += (SEqDot_omega_3 - (beta * SEqHatDot_3)) * deltat;
-		q[3] += (SEqDot_omega_4 - (beta * SEqHatDot_4)) * deltat;
+		q[0] += (SEqDot_omega_1 - (beta * SEqHatDot_1)) * *deltat;
+		q[1] += (SEqDot_omega_2 - (beta * SEqHatDot_2)) * *deltat;
+		q[2] += (SEqDot_omega_3 - (beta * SEqHatDot_3)) * *deltat;
+		q[3] += (SEqDot_omega_4 - (beta * SEqHatDot_4)) * *deltat;
 		// Normalise quaternion
 		norm = sqrt(q[0] * q[0] + q[1] * q[1] + q[2] * q[2] + q[3] * q[3]);
 		q[0] /= norm;
@@ -230,19 +235,11 @@ void madgwick(void)
 		f = (*pony.bus.imu).f.val;
 		w = (*pony.bus.imu).w.val;
 		q = (*pony.bus.imu).q.val;
+		deltat = &pony.bus.imu->dt.val;
 		q[0] = 1; //might read these from config later
 		q[1] = 0;
 		q[2] = 0;
 		q[3] = 0;
-
-		if (pony_extract_double(pony.bus.imu->conf, pony.bus.imu->conflength, "sampling rate = ", &rate))
-		{
-			deltat = 1 / rate;
-		}
-		else
-		{
-
-		}
 
 		if (pony_extract_double(pony.bus.imu->conf, pony.bus.imu->conflength, "error degree = ", &degree))
 		{
