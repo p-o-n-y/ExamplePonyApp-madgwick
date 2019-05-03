@@ -1,4 +1,4 @@
-//#include "stdafx.h" //for Visual studio, otherwise should stay commented out
+//#include "stdafx.h" //for Visual Studio, otherwise should stay commented out (might not be stdafx.h, Visual Studio will specify)
 
 #define _USE_MATH_DEFINES
 
@@ -59,10 +59,10 @@ void read_imu_from_file_aist(void)
 		f = (*pony.bus.imu).f.val;
 		w = (*pony.bus.imu).w.val;
 		int len;
-		if (pony_extract_string_length((*pony.bus.imu).conf, (*pony.bus.imu).conflength, "in = \"", &len))
+		if (pony_extract_string_length((*pony.bus.imu).cfg, (*pony.bus.imu).cfglength, "in = \"", &len))
 		{
 			fileName = malloc(sizeof(char*) * len + 1);
-			pony_extract_string((*pony.bus.imu).conf, (*pony.bus.imu).conflength, "in = \"", &fileName);
+			pony_extract_string((*pony.bus.imu).cfg, (*pony.bus.imu).cfglength, "in = \"", &fileName);
 			fileName[len] = '\0';
 		}
 		else
@@ -104,51 +104,51 @@ void calibr(void)
 	{
 		f = (*pony.bus.imu).f.val;
 		w = (*pony.bus.imu).w.val;
-		if (!pony_extract_float((*pony.bus.imu).conf, (*pony.bus.imu).conflength, "Mwx = ", &Mwx))
+		if (!pony_extract_float((*pony.bus.imu).cfg, (*pony.bus.imu).cfglength, "Mwx = ", &Mwx))
 		{
 			Mwx = 1;
 		}
-		if (!pony_extract_float((*pony.bus.imu).conf, (*pony.bus.imu).conflength, "Mwy = ", &Mwy))
+		if (!pony_extract_float((*pony.bus.imu).cfg, (*pony.bus.imu).cfglength, "Mwy = ", &Mwy))
 		{
 			Mwy = 1;
 		}
-		if (!pony_extract_float((*pony.bus.imu).conf, (*pony.bus.imu).conflength, "Mwz = ", &Mwz))
+		if (!pony_extract_float((*pony.bus.imu).cfg, (*pony.bus.imu).cfglength, "Mwz = ", &Mwz))
 		{
 			Mwz = 1;
 		}
-		if (!pony_extract_float((*pony.bus.imu).conf, (*pony.bus.imu).conflength, "Mfx = ", &Mfx))
+		if (!pony_extract_float((*pony.bus.imu).cfg, (*pony.bus.imu).cfglength, "Mfx = ", &Mfx))
 		{
 			Mfx = 1;
 		}
-		if (!pony_extract_float((*pony.bus.imu).conf, (*pony.bus.imu).conflength, "Mfy = ", &Mfy))
+		if (!pony_extract_float((*pony.bus.imu).cfg, (*pony.bus.imu).cfglength, "Mfy = ", &Mfy))
 		{
 			Mfy = 1;
 		}
-		if (!pony_extract_float((*pony.bus.imu).conf, (*pony.bus.imu).conflength, "Mfz = ", &Mfz))
+		if (!pony_extract_float((*pony.bus.imu).cfg, (*pony.bus.imu).cfglength, "Mfz = ", &Mfz))
 		{
 			Mfz = 1;
 		}
-		if (!pony_extract_float((*pony.bus.imu).conf, (*pony.bus.imu).conflength, "Afx = ", &Afx))
+		if (!pony_extract_float((*pony.bus.imu).cfg, (*pony.bus.imu).cfglength, "Afx = ", &Afx))
 		{
 			Afx = 0;
 		}
-		if (!pony_extract_float((*pony.bus.imu).conf, (*pony.bus.imu).conflength, "Afy = ", &Afy))
+		if (!pony_extract_float((*pony.bus.imu).cfg, (*pony.bus.imu).cfglength, "Afy = ", &Afy))
 		{
 			Afy = 0;
 		}
-		if (!pony_extract_float((*pony.bus.imu).conf, (*pony.bus.imu).conflength, "Afz = ", &Afz))
+		if (!pony_extract_float((*pony.bus.imu).cfg, (*pony.bus.imu).cfglength, "Afz = ", &Afz))
 		{
 			Afz = 0;
 		}
-		if (!pony_extract_float((*pony.bus.imu).conf, (*pony.bus.imu).conflength, "Awx = ", &Awx))
+		if (!pony_extract_float((*pony.bus.imu).cfg, (*pony.bus.imu).cfglength, "Awx = ", &Awx))
 		{
 			Awx = 0;
 		}
-		if (!pony_extract_float((*pony.bus.imu).conf, (*pony.bus.imu).conflength, "Awy = ", &Awy))
+		if (!pony_extract_float((*pony.bus.imu).cfg, (*pony.bus.imu).cfglength, "Awy = ", &Awy))
 		{
 			Awy = 0;
 		}
-		if (!pony_extract_float((*pony.bus.imu).conf, (*pony.bus.imu).conflength, "Awz = ", &Awz))
+		if (!pony_extract_float((*pony.bus.imu).cfg, (*pony.bus.imu).cfglength, "Awz = ", &Awz))
 		{
 			Awz = 0;
 		}
@@ -241,7 +241,7 @@ void madgwick(void)
 		q[2] = 0;
 		q[3] = 0;
 
-		if (pony_extract_double(pony.bus.imu->conf, pony.bus.imu->conflength, "error degree = ", &degree))
+		if (pony_extract_double(pony.bus.imu->cfg, pony.bus.imu->cfglength, "error degree = ", &degree))
 		{
 			gyroMeasError = M_PI * (degree / 180.0f);
 		}
@@ -272,10 +272,10 @@ void write_quat_to_file(void)
 	{
 		q = (*pony.bus.imu).q.val;
 		int len;
-		if (pony_extract_string_length(pony.bus.conf, pony.bus.conflength, "out = \"", &len))
+		if (pony_extract_string_length(pony.bus.cfg, pony.bus.cfglength, "out = \"", &len))
 		{
 			fileName = malloc(sizeof(char*) * len + 1);
-			pony_extract_string(pony.bus.conf, pony.bus.conflength, "out = \"", &fileName);
+			pony_extract_string(pony.bus.cfg, pony.bus.cfglength, "out = \"", &fileName);
 			fileName[len] = '\0';
 		}
 		else
