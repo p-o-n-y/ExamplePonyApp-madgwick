@@ -1,5 +1,3 @@
-//#include "stdafx.h" //for Visual Studio, otherwise should stay commented out (might not be stdafx.h, Visual Studio will specify)
-
 #define _USE_MATH_DEFINES
 
 #include <stdlib.h>
@@ -16,16 +14,18 @@ void write_quat_to_file(void);
 
 int main()
 {
-	pony_add_plugin(read_imu_from_file_aist);
-	pony_add_plugin(calibr);
-	pony_add_plugin(madgwick);
-	pony_add_plugin(write_quat_to_file);
-
-	if (pony_init("{imu: in = \"newData.txt\" Mwx = 7177.32; Mwy = 7848.36; Mwz = 7925.76; Mfx = 2.0019; Afx = -254.4204; Mfy = 2.0015; Afy = 261.7441; Mfz = 2.0009; Afz = -260.9625; fs = 250; error degree = 5} out = \"out.txt\""));
+	if (!(
+		pony_add_plugin(read_imu_from_file_aist)
+		&& pony_add_plugin(calibr)
+		&& pony_add_plugin(madgwick)
+		&& pony_add_plugin(write_quat_to_file)
+		))
 	{
-		while (pony_step());
+		if (pony_init("{imu: in = \"newData.txt\" Mwx = 7177.32; Mwy = 7848.36; Mwz = 7925.76; Mfx = 2.0019; Afx = -254.4204; Mfy = 2.0015; Afy = 261.7441; Mfz = 2.0009; Afz = -260.9625; fs = 250; error degree = 5} out = \"out3.txt\""));
+		{
+			while (pony_step());
+		}
 	}
-
 	return 0;
 }
 
