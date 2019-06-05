@@ -14,7 +14,7 @@ void write_quat_to_file(void);
 
 int main()
 {
-	if (!(
+	if ((
 		pony_add_plugin(read_imu_from_file_aist)
 		&& pony_add_plugin(calibr)
 		&& pony_add_plugin(madgwick)
@@ -83,7 +83,7 @@ void read_imu_from_file_aist(void)
 
 void calibr(void)
 {
-	static float Mwx, Mwy, Mwz, Mfx, Mfy, Mfz, Afx, Afy, Afz, Awx, Awy, Awz;
+	static double Mwx, Mwy, Mwz, Mfx, Mfy, Mfz, Afx, Afy, Afz, Awx, Awy, Awz;
 	static double* f, *w;
 
 	if (pony.bus.mode > 0)
@@ -104,51 +104,51 @@ void calibr(void)
 	{
 		f = (*pony.bus.imu).f.val;
 		w = (*pony.bus.imu).w.val;
-		if (!pony_extract_float((*pony.bus.imu).cfg, (*pony.bus.imu).cfglength, "Mwx = ", &Mwx))
+		if (!pony_extract_double((*pony.bus.imu).cfg, (*pony.bus.imu).cfglength, "Mwx = ", &Mwx))
 		{
 			Mwx = 1;
 		}
-		if (!pony_extract_float((*pony.bus.imu).cfg, (*pony.bus.imu).cfglength, "Mwy = ", &Mwy))
+		if (!pony_extract_double((*pony.bus.imu).cfg, (*pony.bus.imu).cfglength, "Mwy = ", &Mwy))
 		{
 			Mwy = 1;
 		}
-		if (!pony_extract_float((*pony.bus.imu).cfg, (*pony.bus.imu).cfglength, "Mwz = ", &Mwz))
+		if (!pony_extract_double((*pony.bus.imu).cfg, (*pony.bus.imu).cfglength, "Mwz = ", &Mwz))
 		{
 			Mwz = 1;
 		}
-		if (!pony_extract_float((*pony.bus.imu).cfg, (*pony.bus.imu).cfglength, "Mfx = ", &Mfx))
+		if (!pony_extract_double((*pony.bus.imu).cfg, (*pony.bus.imu).cfglength, "Mfx = ", &Mfx))
 		{
 			Mfx = 1;
 		}
-		if (!pony_extract_float((*pony.bus.imu).cfg, (*pony.bus.imu).cfglength, "Mfy = ", &Mfy))
+		if (!pony_extract_double((*pony.bus.imu).cfg, (*pony.bus.imu).cfglength, "Mfy = ", &Mfy))
 		{
 			Mfy = 1;
 		}
-		if (!pony_extract_float((*pony.bus.imu).cfg, (*pony.bus.imu).cfglength, "Mfz = ", &Mfz))
+		if (!pony_extract_double((*pony.bus.imu).cfg, (*pony.bus.imu).cfglength, "Mfz = ", &Mfz))
 		{
 			Mfz = 1;
 		}
-		if (!pony_extract_float((*pony.bus.imu).cfg, (*pony.bus.imu).cfglength, "Afx = ", &Afx))
+		if (!pony_extract_double((*pony.bus.imu).cfg, (*pony.bus.imu).cfglength, "Afx = ", &Afx))
 		{
 			Afx = 0;
 		}
-		if (!pony_extract_float((*pony.bus.imu).cfg, (*pony.bus.imu).cfglength, "Afy = ", &Afy))
+		if (!pony_extract_double((*pony.bus.imu).cfg, (*pony.bus.imu).cfglength, "Afy = ", &Afy))
 		{
 			Afy = 0;
 		}
-		if (!pony_extract_float((*pony.bus.imu).cfg, (*pony.bus.imu).cfglength, "Afz = ", &Afz))
+		if (!pony_extract_double((*pony.bus.imu).cfg, (*pony.bus.imu).cfglength, "Afz = ", &Afz))
 		{
 			Afz = 0;
 		}
-		if (!pony_extract_float((*pony.bus.imu).cfg, (*pony.bus.imu).cfglength, "Awx = ", &Awx))
+		if (!pony_extract_double((*pony.bus.imu).cfg, (*pony.bus.imu).cfglength, "Awx = ", &Awx))
 		{
 			Awx = 0;
 		}
-		if (!pony_extract_float((*pony.bus.imu).cfg, (*pony.bus.imu).cfglength, "Awy = ", &Awy))
+		if (!pony_extract_double((*pony.bus.imu).cfg, (*pony.bus.imu).cfglength, "Awy = ", &Awy))
 		{
 			Awy = 0;
 		}
-		if (!pony_extract_float((*pony.bus.imu).cfg, (*pony.bus.imu).cfglength, "Awz = ", &Awz))
+		if (!pony_extract_double((*pony.bus.imu).cfg, (*pony.bus.imu).cfglength, "Awz = ", &Awz))
 		{
 			Awz = 0;
 		}
@@ -231,7 +231,7 @@ void madgwick(void)
 	}
 	else if (pony.bus.mode == 0)
 	{
-		double rate, degree;
+		double degree;
 		f = (*pony.bus.imu).f.val;
 		w = (*pony.bus.imu).w.val;
 		q = (*pony.bus.imu).q.val;
