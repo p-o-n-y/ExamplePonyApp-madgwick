@@ -88,11 +88,6 @@ void calibr(void)
 
 	if (pony.bus.mode > 0)
 	{
-		double temp[3];
-		temp[0] = ((w[0] - Awx) * M_PI) / (1.9937 * 648000); //gyroscope
-		temp[1] = ((w[1] - Awy) * M_PI) / (2.1801 * 648000); //Mwx = ; Mwy = ; Mwz = 
-		temp[2] = ((w[2] - Awz) * M_PI) / (2.2016 * 648000);
-
 		w[0] = (w[0] - Awx) / Mwx * (M_PI / 180); //gyroscope
 		w[1] = (w[1] - Awy) / Mwy * (M_PI / 180);
 		w[2] = (w[2] - Awz) / Mwz * (M_PI / 180);
