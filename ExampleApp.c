@@ -148,10 +148,6 @@ void calibr(void)
 			Awz = 0;
 		}
 	}
-	else
-	{
-
-	}
 }
 
 void madgwick(void)
@@ -246,10 +242,6 @@ void madgwick(void)
 		}
 
 		beta = sqrt(3.0f / 4.0f) * gyroMeasError;
-	}
-	else
-	{
-
 	}
 }
 
